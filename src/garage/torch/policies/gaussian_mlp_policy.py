@@ -115,6 +115,22 @@ class GaussianMLPPolicy(Policy, GaussianMLPModule):
                     dict(mean=dist.mean.squeeze(0).numpy(),
                          log_std=(dist.variance**.5).log().squeeze(0).numpy()))
 
+    # pylint: disable=arguments-differ
+    def forward(self, observations):
+        """Forward method.
+
+        Args:
+            observations (torch.Tensor): Observation from the environment.
+
+        Returns:
+            torch.distributions.independent.Independent: Independent
+                distribution. (reinterpreted_batch_ndims == 1)
+
+        """
+        dist = super().forward(observations)
+        dist.reinterpreted_batch_ndims = 1
+        return dist
+
     def get_actions(self, observations):
         r"""Get actions given observations.
 

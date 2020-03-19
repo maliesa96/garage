@@ -74,15 +74,14 @@ class TRPO(VPG):
                          stop_entropy_gradient=stop_entropy_gradient,
                          entropy_method=entropy_method)
 
-    def _compute_objective(self, advantages, valids, obs, actions, rewards):
-        """Compute the surrogate objective.
+    def _compute_objective(self, advantages, obs, actions, rewards):
+        """Compute objective value.
 
         Args:
-            advantages (torch.Tensor): Expected rewards over the actions
-            valids (list[int]): length of the valid values for each path
+            advantages (torch.Tensor): Advantage value at each step.
             obs (torch.Tensor): Observation from the environment.
-            actions (torch.Tensor): Predicted action.
-            rewards (torch.Tensor): Feedback from the environment.
+            actions (torch.Tensor): Actions fed to the environment.
+            rewards (torch.Tensor): Acquired rewards.
 
         Returns:
             torch.Tensor: Calculated objective values
@@ -99,8 +98,17 @@ class TRPO(VPG):
 
         return surrogate
 
-    def _optimize(self, itr, obs, actions, rewards, valids, baselines):
+    def _optimize(self, obs, actions, rewards, advantages):
+        """Performs a optimization.
+
+        Args:
+            obs (torch.Tensor): Observation from the environment.
+            actions (torch.Tensor): Actions fed to the environment.
+            rewards (torch.Tensor): Acquired rewards.
+            advantages (torch.Tensor): Advantage value at each step.
+
+        """
         self._optimizer.step(
-            f_loss=lambda: self._compute_loss(itr, obs, actions, rewards,
-                                              valids, baselines),
+            f_loss=lambda: self._compute_loss_with_adv(obs, actions, rewards,
+                                                       advantages),
             f_constraint=lambda: self._compute_kl_constraint(obs))
