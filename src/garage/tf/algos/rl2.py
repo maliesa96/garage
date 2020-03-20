@@ -10,12 +10,158 @@ from dowel import logger, tabular
 import gym
 import numpy as np
 
-from garage import log_performance, TrajectoryBatch
+from garage import log_multitask_performance, TrajectoryBatch
 from garage.envs import EnvSpec
 from garage.misc import tensor_utils as np_tensor_utils
 from garage.np.algos import MetaRLAlgorithm
 from garage.sampler import DefaultWorker
 from garage.tf.algos._rl2npo import RL2NPO
+
+
+class RL2Env(gym.Wrapper):
+    """Environment wrapper for RL2.
+
+    In RL2, observation is concatenated with previous action,
+    reward and terminal signal to form new observation.
+
+    Also, different tasks could have different observation dimension.
+    An example is in ML45 from MetaWorld (reference:
+    https://arxiv.org/pdf/1910.10897.pdf). This wrapper pads the
+    observation to the maximum observation dimension with zeros.
+
+    Args:
+        env (gym.Env): An env that will be wrapped.
+        max_obs_dim (int): Maximum observation dimension in the environments
+             or tasks. Set to None when it is not applicable.
+
+    """
+
+    def __init__(self, env, max_obs_dim=None):
+        super().__init__(env)
+        self._max_obs_dim = max_obs_dim
+        action_space = akro.from_gym(self.env.action_space)
+        observation_space = self._create_rl2_obs_space(env)
+        self._spec = EnvSpec(action_space=action_space,
+                             observation_space=observation_space)
+
+    def _create_rl2_obs_space(self, env):
+        """Create observation space for RL2.
+
+        Args:
+            env (gym.Env): An env that will be wrapped.
+
+        Returns:
+            gym.spaces.Box: Augmented observation space.
+
+        """
+        obs_flat_dim = np.prod(env.observation_space.shape)
+        action_flat_dim = np.prod(env.action_space.shape)
+        if self._max_obs_dim is not None:
+            obs_flat_dim = self._max_obs_dim
+        return akro.Box(low=-np.inf,
+                        high=np.inf,
+                        shape=(obs_flat_dim + action_flat_dim + 1 + 1, ))
+
+    # pylint: disable=arguments-differ
+    def reset(self):
+        """gym.Env reset function.
+
+        Returns:
+            np.ndarray: augmented observation.
+
+        """
+        obs = self.env.reset()
+        if self._max_obs_dim is not None:
+            obs = np_tensor_utils.pad_tensor(obs, np.prod(self._max_obs_dim))
+        return np.concatenate(
+            [obs, np.zeros(self.env.action_space.shape), [0], [0]])
+
+    def step(self, action):
+        """gym.Env step function.
+
+        Args:
+            action (int): action taken.
+
+        Returns:
+            np.ndarray: augmented observation.
+            float: reward.
+            bool: terminal signal.
+            dict: environment info.
+
+        """
+        next_obs, reward, done, info = self.env.step(action)
+        if self._max_obs_dim is not None:
+            next_obs = np_tensor_utils.pad_tensor(next_obs,
+                                                  np.prod(self._max_obs_dim))
+        next_obs = np.concatenate([next_obs, action, [reward], [done]])
+        return next_obs, reward, done, info
+
+    @property
+    def spec(self):
+        """Environment specification.
+
+        Returns:
+            EnvSpec: Environment specification.
+
+        """
+        return self._spec
+
+
+class RL2Worker(DefaultWorker):
+    """Initialize a worker for RL2.
+
+    In RL2, policy does not reset between trajectories in each meta batch.
+    Policy only resets once at the beginning of a trial/meta batch.
+
+    Args:
+        seed(int): The seed to use to intialize random number generators.
+        max_path_length(int or float): The maximum length paths which will
+            be sampled. Can be (floating point) infinity.
+        worker_number(int): The number of the worker where this update is
+            occurring. This argument is used to set a different seed for each
+            worker.
+        n_paths_per_trial (int): Number of trajectories sampled per trial/
+            meta batch. Policy resets in the beginning of a meta batch,
+            and obtain `n_paths_per_trial` trajectories in one meta batch.
+
+    Attributes:
+        agent(Policy or None): The worker's agent.
+        env(gym.Env or None): The worker's environment.
+
+    """
+
+    def __init__(
+            self,
+            *,  # Require passing by keyword, since everything's an int.
+            seed,
+            max_path_length,
+            worker_number,
+            n_paths_per_trial=2):
+        self._n_paths_per_trial = n_paths_per_trial
+        super().__init__(seed=seed,
+                         max_path_length=max_path_length,
+                         worker_number=worker_number)
+
+    def start_rollout(self):
+        """Begin a new rollout."""
+        self._path_length = 0
+        self._prev_obs = self.env.reset()
+
+    def rollout(self):
+        """Sample a single rollout of the agent in the environment.
+
+        Returns:
+            garage.TrajectoryBatch: The collected trajectory.
+
+        """
+        self.agent.reset()
+        for _ in range(self._n_paths_per_trial):
+            self.start_rollout()
+            while not self.step_rollout():
+                pass
+        self._agent_infos['batch_idx'] = np.full(len(self._rewards),
+                                                 self._worker_number)
+        return self.collect_rollout()
 
 
 class RL2(MetaRLAlgorithm, abc.ABC):
@@ -129,6 +275,7 @@ class RL2(MetaRLAlgorithm, abc.ABC):
         """
         return exploration_policy
 
+    # pylint: disable=protected-access
     def _process_samples(self, itr, paths):
         # pylint: disable=too-many-statements
         """Return processed sample data based on the collected paths.
@@ -185,9 +332,18 @@ class RL2(MetaRLAlgorithm, abc.ABC):
             np_tensor_utils.stack_and_pad_tensor_dict_list(
                 concatenated_paths, self._inner_algo.max_path_length))
 
-        undiscounted_returns = log_performance(
-            itr, TrajectoryBatch.from_trajectory_list(self._env_spec, paths),
-            self._inner_algo.discount)
+        name_map = None
+        if hasattr(self._task_sampler._envs[0].env, 'all_task_names'):
+            names = [
+                env.env.all_task_names[0] for env in self._task_sampler._envs
+            ]
+            name_map = dict(zip(names, names))
+
+        undiscounted_returns = log_multitask_performance(
+            itr,
+            TrajectoryBatch.from_trajectory_list(self._env_spec, paths),
+            self._inner_algo.discount,
+            name_map=name_map)
 
         concatenated_paths_stacked['paths'] = concatenated_paths
         concatenated_paths_stacked['average_return'] = np.mean(
@@ -267,161 +423,3 @@ class RL2(MetaRLAlgorithm, abc.ABC):
 
         """
         return self._rl2_max_path_length
-
-
-class RL2Env(gym.Wrapper):
-    """Environment wrapper for RL2.
-
-    In RL2, observation is concatenated with previous action,
-    reward and terminal signal to form new observation.
-
-    Also, different tasks could have different observation dimension.
-    An example is in ML45 from MetaWorld (reference:
-    https://arxiv.org/pdf/1910.10897.pdf). This wrapper pads the
-    observation to the maximum observation dimension with zeros.
-
-    Args:
-        env (gym.Env): An env that will be wrapped.
-        max_obs_dim (int): Maximum observation dimension in the environments
-             or tasks. Set to None when it is not applicable.
-
-    """
-
-    def __init__(self, env, max_obs_dim=None):
-        super().__init__(env)
-        self._max_obs_dim = max_obs_dim
-        action_space = akro.from_gym(self.env.action_space)
-        observation_space = self._create_rl2_obs_space(env)
-        self._spec = EnvSpec(action_space=action_space,
-                             observation_space=observation_space)
-
-    def _create_rl2_obs_space(self, env):
-        """Create observation space for RL2.
-
-        Args:
-            env (gym.Env): An env that will be wrapped.
-
-        Returns:
-            gym.spaces.Box: Augmented observation space.
-
-        """
-        obs_flat_dim = np.prod(env.observation_space.shape)
-        action_flat_dim = np.prod(env.action_space.shape)
-        if self._max_obs_dim is not None:
-            obs_flat_dim = self._max_obs_dim
-        return akro.Box(low=-np.inf,
-                        high=np.inf,
-                        shape=(obs_flat_dim + action_flat_dim + 1 + 1, ))
-
-    # pylint: disable=arguments-differ
-    def reset(self):
-        """gym.Env reset function.
-
-        Returns:
-            np.ndarray: augmented observation.
-
-        """
-        obs = self.env.reset()
-        if self._max_obs_dim is not None:
-            obs = np.concatenate([obs, self._pad_zeros(obs)])
-        return np.concatenate(
-            [obs, np.zeros(self.env.action_space.shape), [0], [0]])
-
-    def step(self, action):
-        """gym.Env step function.
-
-        Args:
-            action (int): action taken.
-
-        Returns:
-            np.ndarray: augmented observation.
-            float: reward.
-            bool: terminal signal.
-            dict: environment info.
-
-        """
-        next_obs, reward, done, info = self.env.step(action)
-        if self._max_obs_dim is not None:
-            next_obs = np.concatenate([next_obs, self._pad_zeros(next_obs)])
-        next_obs = np.concatenate([next_obs, action, [reward], [done]])
-        return next_obs, reward, done, info
-
-    @property
-    def spec(self):
-        """Environment specification.
-
-        Returns:
-            EnvSpec: Environment specification.
-
-        """
-        return self._spec
-
-    def _pad_zeros(self, obs):
-        """Pad zeros to observation according to the given max_obs_dim.
-
-        Args:
-            obs (numpy.ndarray): Observation to be padded.
-
-        Returns:
-            np.ndarray: padded observation.
-
-        """
-        dim_to_pad = np.prod(self._max_obs_dim) - np.prod(obs.shape)
-        return np.zeros(dim_to_pad)
-
-
-class RL2Worker(DefaultWorker):
-    """Initialize a worker for RL2.
-
-    In RL2, policy does not reset between trajectories in each meta batch.
-    Policy only resets once at the beginning of a trial/meta batch.
-
-    Args:
-        seed(int): The seed to use to intialize random number generators.
-        max_path_length(int or float): The maximum length paths which will
-            be sampled. Can be (floating point) infinity.
-        worker_number(int): The number of the worker where this update is
-            occurring. This argument is used to set a different seed for each
-            worker.
-        n_paths_per_trial (int): Number of trajectories sampled per trial/
-            meta batch. Policy resets in the beginning of a meta batch,
-            and obtain `n_paths_per_trial` trajectories in one meta batch.
-
-    Attributes:
-        agent(Policy or None): The worker's agent.
-        env(gym.Env or None): The worker's environment.
-
-    """
-
-    def __init__(
-            self,
-            *,  # Require passing by keyword, since everything's an int.
-            seed,
-            max_path_length,
-            worker_number,
-            n_paths_per_trial=2):
-        self._n_paths_per_trial = n_paths_per_trial
-        super().__init__(seed=seed,
-                         max_path_length=max_path_length,
-                         worker_number=worker_number)
-
-    def start_rollout(self):
-        """Begin a new rollout."""
-        self._path_length = 0
-        self._prev_obs = self.env.reset()
-
-    def rollout(self):
-        """Sample a single rollout of the agent in the environment.
-
-        Returns:
-            garage.TrajectoryBatch: The collected trajectory.
-
-        """
-        self.agent.reset()
-        for _ in range(self._n_paths_per_trial):
-            self.start_rollout()
-            while not self.step_rollout():
-                pass
-        self._agent_infos['batch_idx'] = np.full(len(self._rewards),
-                                                 self._worker_number)
-        return self.collect_rollout()
