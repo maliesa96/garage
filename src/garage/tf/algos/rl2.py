@@ -322,10 +322,8 @@ class RL2Env(gym.Wrapper):
 
         """
         obs = self.env.reset()
-        # pad zeros if needed for running ML45
         if self._max_obs_dim is not None:
-            obs = np.concatenate(
-                [obs, np.zeros(self._max_obs_dim - obs.shape[0])])
+            obs = np.concatenate([obs, self._pad_zeros(obs)])
         return np.concatenate(
             [obs, np.zeros(self.env.action_space.shape), [0], [0]])
 
@@ -344,9 +342,7 @@ class RL2Env(gym.Wrapper):
         """
         next_obs, reward, done, info = self.env.step(action)
         if self._max_obs_dim is not None:
-            next_obs = np.concatenate(
-                [next_obs,
-                 np.zeros(self._max_obs_dim - next_obs.shape[0])])
+            next_obs = np.concatenate([next_obs, self._pad_zeros(next_obs)])
         next_obs = np.concatenate([next_obs, action, [reward], [done]])
         return next_obs, reward, done, info
 
@@ -359,6 +355,19 @@ class RL2Env(gym.Wrapper):
 
         """
         return self._spec
+
+    def _pad_zeros(self, obs):
+        """Pad zeros to observation according to the given max_obs_dim.
+
+        Args:
+            obs (numpy.ndarray): Observation to be padded.
+
+        Returns:
+            np.ndarray: padded observation.
+
+        """
+        dim_to_pad = np.prod(self._max_obs_dim) - np.prod(obs.shape)
+        return np.zeros(dim_to_pad)
 
 
 class RL2Worker(DefaultWorker):
