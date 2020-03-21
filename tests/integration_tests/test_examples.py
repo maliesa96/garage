@@ -129,3 +129,14 @@ def test_maml_halfcheetah():
         '1', '--rollouts_per_task', '1', '--meta_batch_size', '1'
     ],
                           check=False).returncode == 0
+
+
+@pytest.mark.no_cover
+@pytest.mark.timeout(120)
+def test_maml_ml10():
+    """Test maml_trpo_ml10.py"""
+    assert subprocess.run([
+        EXAMPLES_ROOT_DIR / 'torch/maml_trpo_ml10.py', '--epochs', '1',
+        '--rollouts_per_task', '1', '--meta_batch_size', '1'
+    ],
+                          check=False).returncode == 0

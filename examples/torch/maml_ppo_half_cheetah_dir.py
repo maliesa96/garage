@@ -9,6 +9,8 @@ from garage.envs import HalfCheetahDirEnv, normalize
 from garage.envs.base import GarageEnv
 from garage.experiment import LocalRunner
 from garage.experiment.deterministic import set_seed
+from garage.experiment.meta_evaluator import MetaEvaluator
+from garage.experiment.task_sampler import SetTaskSampler
 from garage.np.baselines import LinearFeatureBaseline
 from garage.torch.algos import MAMLPPO
 from garage.torch.policies import GaussianMLPPolicy
@@ -48,6 +50,14 @@ def maml_ppo(ctxt, seed, epochs, rollouts_per_task, meta_batch_size):
 
     max_path_length = 100
 
+    tasks = SetTaskSampler(lambda: GarageEnv(
+        normalize(HalfCheetahDirEnv(), expected_action_scale=10.)))
+
+    meta_evaluator = MetaEvaluator(test_task_sampler=tasks,
+                                   max_path_length=max_path_length,
+                                   n_test_tasks=1,
+                                   n_test_rollouts=10)
+
     runner = LocalRunner(ctxt)
     algo = MAMLPPO(env=env,
                    policy=policy,
@@ -57,7 +67,8 @@ def maml_ppo(ctxt, seed, epochs, rollouts_per_task, meta_batch_size):
                    discount=0.99,
                    gae_lambda=1.,
                    inner_lr=0.1,
-                   num_grad_updates=1)
+                   num_grad_updates=1,
+                   meta_evaluator=meta_evaluator)
 
     runner.setup(algo, env)
     runner.train(n_epochs=epochs,
