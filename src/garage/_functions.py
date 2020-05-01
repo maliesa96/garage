@@ -1,4 +1,5 @@
 """Functions exposed directly in the garage namespace."""
+import akro
 from collections import defaultdict
 
 from dowel import tabular
@@ -103,3 +104,14 @@ def log_performance(itr, batch, discount, prefix='Evaluation'):
             tabular.record('SuccessRate', np.mean(success))
 
     return undiscounted_returns
+
+
+def cnn_verify_obs_space(env_spec):
+    if (not isinstance(env_spec.observation_space, akro.Box)
+            or not len(env_spec.observation_space.shape) in (2, 3)):
+        raise ValueError(
+            'CNN primitives can only process 2D, 3D akro.Image or'
+            ' akro.Box observations, but received an env_spec with '
+            'observation_space of type {} and shape {}'.format(
+                type(env_spec.observation_space).__name__,
+                env_spec.observation_space.shape))
