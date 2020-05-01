@@ -25,11 +25,7 @@ class CNNMLPMergeModel(Model):
         strides (tuple[int]): The stride of the sliding window. For example,
             (1, 2) means there are two convolutional layers. The stride of the
             filter for first layer is 1 and that of the second layer is 2.
-<<<<<<< HEAD
         hidden_sizes (tuple[int]): Output dimension of dense layer(s).
-=======
-        hidden_sizes (list[int]): Output dimension of dense layer(s).
->>>>>>> Adds ContinuousCNNQFunction
             For example, (32, 32) means the MLP of this q-function consists of
             two hidden layers, each with 32 hidden units.
         output_dim (int): Dimension of the network output.
@@ -154,7 +150,6 @@ class CNNMLPMergeModel(Model):
         tensor.
 
         Args:
-<<<<<<< HEAD
             state (tf.Tensor): State placeholder tensor of shape
                 :math:`(N, O*)`.
             action (tf.Tensor): Action placeholder tensor of shape
@@ -163,14 +158,6 @@ class CNNMLPMergeModel(Model):
 
         Returns:
             tf.Tensor: Output of the model of shape (N, output_dim).
-=======
-            state (tf.Tensor): State placeholder tensor.
-            action (tf.Tensor): Action placeholder tensor.
-            name (str): Name of the model.
-
-        Returns:
-            tf.Tensor: Output of the model.
->>>>>>> Adds ContinuousCNNQFunction
         """
         cnn_out = self.cnn_model.build(state, name=name)
         mlp_out = self.mlp_merge_model.build(cnn_out, action, name=name)

@@ -25,11 +25,7 @@ class ContinuousCNNQFunction(QFunction):
         strides (tuple[int]): The stride of the sliding window. For example,
             (1, 2) means there are two convolutional layers. The stride of the
             filter for first layer is 1 and that of the second layer is 2.
-<<<<<<< HEAD
         hidden_sizes (tuple[int]): Output dimension of dense layer(s).
-=======
-        hidden_sizes (list[int]): Output dimension of dense layer(s).
->>>>>>> Adds ContinuousCNNQFunction
             For example, (32, 32) means the MLP of this q-function consists of
             two hidden layers, each with 32 hidden units.
         action_merge_layer (int): The index of layers at which to concatenate
@@ -93,13 +89,8 @@ class ContinuousCNNQFunction(QFunction):
                  output_b_init=tf.zeros_initializer(),
                  layer_normalization=False):
 
-<<<<<<< HEAD
         if (not isinstance(env_spec.observation_space, akro.Box)
                 or not len(env_spec.observation_space.shape) in (2, 3)):
-=======
-        if not isinstance(env_spec.observation_space, akro.Box) or \
-                not len(env_spec.observation_space.shape) in (2, 3):
->>>>>>> Adds ContinuousCNNQFunction
             raise ValueError(
                 '{} can only process 2D, 3D akro.Image or'
                 ' akro.Box observations, but received an env_spec with '
@@ -171,19 +162,11 @@ class ContinuousCNNQFunction(QFunction):
 
     @property
     def inputs(self):
-<<<<<<< HEAD
         """tuple[tf.Tensor]: The observation and action input tensors.
 
         The returned tuple contains two tensors. The first is the observation
         tensor with shape :math:`(N, O*)`, and the second is the action tensor
         with shape :math:`(N, A*)`.
-=======
-        """Return the input tensor.
-
-        Returns:
-            tf.Tensor: The input tensors of the model.
-
->>>>>>> Adds ContinuousCNNQFunction
         """
         return self.model.networks['default'].inputs
 
@@ -191,7 +174,6 @@ class ContinuousCNNQFunction(QFunction):
         """Q Value of the network.
 
         Args:
-<<<<<<< HEAD
             observation (np.ndarray): Observation input of shape
                 :math:`(N, O*)`.
             action (np.ndarray): Action input of shape :math:`(N, A*)`.
@@ -205,18 +187,6 @@ class ContinuousCNNQFunction(QFunction):
             if len(observation.shape) <= 3:
                 observation = self._env_spec.observation_space.unflatten(
                     observation)
-=======
-            observation (np.ndarray): Observation input.
-            action (np.ndarray): Action input.
-
-        Returns:
-            np.ndarray: Q values.
-
-        """
-        if isinstance(self._env_spec.observation_space, akro.Image):
-            if len(self._env_spec.observation_space.shape) < 3:
-                self._env_spec.observation_space.unflatten(observation)
->>>>>>> Adds ContinuousCNNQFunction
             observation = observation / 255.0
         return self._f_qval(observation, action)
 
@@ -225,7 +195,6 @@ class ContinuousCNNQFunction(QFunction):
         """Symbolic graph for q-network.
 
         Args:
-<<<<<<< HEAD
             state_input (tf.Tensor): The state input tf.Tensor of shape
                 :math:`(N, O*)`.
             action_input (tf.Tensor): The action input tf.Tensor of shape
@@ -234,15 +203,6 @@ class ContinuousCNNQFunction(QFunction):
 
         Return:
             tf.Tensor: The output Q value tensor of shape :math:`(N, )`.
-=======
-            state_input (tf.Tensor): The state input tf.Tensor to the network.
-            action_input (tf.Tensor): The action input tf.Tensor to the
-                network.
-            name (str): Network variable scope.
-
-        Return:
-            tf.Tensor: The output of Continuous CNN QFunction.
->>>>>>> Adds ContinuousCNNQFunction
 
         """
         with tf.compat.v1.variable_scope(self._variable_scope):

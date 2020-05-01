@@ -53,6 +53,7 @@ class DDPG(OffPolicyRLAlgorithm):
         max_action (float): Maximum action magnitude.
         reward_scale (float): Reward scale.
         smooth_return (bool): Whether to smooth the return.
+        flatten_obses (bool): Whether to flatten observations.
         name (str): Name of the algorithm shown in computation graph.
 
     """
@@ -82,6 +83,7 @@ class DDPG(OffPolicyRLAlgorithm):
                  max_action=None,
                  reward_scale=1.,
                  smooth_return=True,
+                 flatten_obses=True,
                  name='DDPG'):
         action_bound = env_spec.action_space.high
         self.max_action = action_bound if max_action is None else max_action
@@ -96,6 +98,7 @@ class DDPG(OffPolicyRLAlgorithm):
         self.clip_pos_returns = clip_pos_returns
         self.clip_return = clip_return
         self.success_history = deque(maxlen=100)
+        self.flatten_obses = flatten_obses
 
         self.episode_rewards = []
         self.episode_policy_losses = []
@@ -151,16 +154,20 @@ class DDPG(OffPolicyRLAlgorithm):
                 inputs=[], outputs=target_update_op)
 
             with tf.name_scope('inputs'):
-                obs_dim = self.env_spec.observation_space.flat_dim
+                if not self.flatten_obses:
+                    obs_dim = self.env_spec.observation_space.shape
+                else:
+                    obs_dim = self.env_spec.observation_space.flat_dim
                 input_y = tf.compat.v1.placeholder(tf.float32,
                                                    shape=(None, 1),
                                                    name='input_y')
                 obs = tf.compat.v1.placeholder(tf.float32,
-                                               shape=(None, obs_dim),
+                                               shape=(None, ) + obs_dim,
                                                name='input_observation')
+
                 actions = tf.compat.v1.placeholder(
                     tf.float32,
-                    shape=(None, self.env_spec.action_space.flat_dim),
+                    shape=(None, ) + self.env_spec.action_space.shape,
                     name='input_action')
             # Set up policy training function
             next_action = self.policy.get_action_sym(obs, name='policy_action')
